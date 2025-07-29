@@ -7,6 +7,7 @@ if TYPE_CHECKING:
 	from browser_use.browser.types import Page
 
 
+from browser_use.dom.cache import get_dom_cache
 from browser_use.dom.views import (
 	DOMBaseNode,
 	DOMElementNode,
@@ -31,6 +32,7 @@ class DomService:
 		self.page = page
 		self.xpath_cache = {}
 		self.logger = logger or logging.getLogger(__name__)
+		self.dom_cache = get_dom_cache()
 
 		self.js_code = resources.files('browser_use.dom.dom_tree').joinpath('index.js').read_text()
 
@@ -43,8 +45,23 @@ class DomService:
 		focus_element: int = -1,
 		viewport_expansion: int = 0,
 	) -> DOMState:
+		# Try to get from cache first
+		cached_state = await self.dom_cache.get(
+			self.page, highlight_elements, focus_element, viewport_expansion
+		)
+		if cached_state:
+			return cached_state
+		
+		# Build DOM tree if not cached
 		element_tree, selector_map = await self._build_dom_tree(highlight_elements, focus_element, viewport_expansion)
-		return DOMState(element_tree=element_tree, selector_map=selector_map)
+		dom_state = DOMState(element_tree=element_tree, selector_map=selector_map)
+		
+		# Cache the result
+		await self.dom_cache.set(
+			self.page, highlight_elements, focus_element, viewport_expansion, dom_state
+		)
+		
+		return dom_state
 
 	@time_execution_async('--get_cross_origin_iframes')
 	async def get_cross_origin_iframes(self) -> list[str]:

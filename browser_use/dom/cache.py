@@ -1,4 +1,17 @@
-"""DOM caching service for performance optimization."""
+"""
+DOM CACHING SERVICE - PERFORMANCE OPTIMIZATION
+==============================================
+This module implements caching for DOM states to avoid redundant extractions.
+
+CACHE WORKFLOW:
+STEP 8A: Check if DOM state exists in cache
+STEP 8B: Validate cache entry (TTL, page state)
+STEP 11A: Store newly extracted DOM state
+STEP 11B: Manage cache size (LRU eviction)
+
+Cache dramatically improves performance by avoiding re-extraction
+of DOM states within a short time window (default 2 seconds).
+"""
 import asyncio
 import hashlib
 import logging
@@ -56,21 +69,33 @@ class DOMCache:
 		focus_element: int,
 		viewport_expansion: int,
 	) -> Optional[DOMState]:
-		"""Get cached DOM state if available and not expired."""
+		"""
+		STEP 8A: Check if DOM state exists in cache
+		===========================================
+		Attempts to retrieve a cached DOM state for the given parameters.
+		
+		Cache lookup process:
+		1. Generate cache key from page URL and parameters
+		2. Check if key exists in cache
+		3. Validate entry hasn't expired (TTL check)
+		4. Update LRU ordering if valid
+		5. Return cached state or None
+		"""
 		cache_key = self._generate_cache_key(page, highlight_elements, focus_element, viewport_expansion)
 		
 		async with self._lock:
 			if cache_key in self._cache:
 				dom_state, timestamp = self._cache[cache_key]
 				
-				# Check if cache entry is expired
+				# STEP 8B: Validate cache entry
+				# Check if cache entry has expired
 				if time.time() - timestamp > self.ttl_seconds:
 					logger.debug(f"Cache expired for key {cache_key[:8]}...")
 					del self._cache[cache_key]
 					self._access_order.remove(cache_key)
 					return None
 				
-				# Move to end for LRU
+				# Update LRU ordering - move to end
 				self._access_order.remove(cache_key)
 				self._access_order.append(cache_key)
 				
@@ -87,23 +112,38 @@ class DOMCache:
 		viewport_expansion: int,
 		dom_state: DOMState,
 	) -> None:
-		"""Store DOM state in cache."""
+		"""
+		STEP 11A: Store newly extracted DOM state
+		=========================================
+		Caches a DOM state after successful extraction.
+		
+		Storage process:
+		1. Generate cache key
+		2. Check cache capacity
+		3. Evict oldest entry if needed (LRU)
+		4. Store state with timestamp
+		5. Track cache key for page cleanup
+		"""
 		cache_key = self._generate_cache_key(page, highlight_elements, focus_element, viewport_expansion)
 		
 		async with self._lock:
-			# Evict oldest entry if cache is full
+			# STEP 11B: Manage cache size (LRU eviction)
+			# If cache is full and this is a new entry, evict oldest
 			if len(self._cache) >= self.max_size and cache_key not in self._cache:
 				oldest_key = self._access_order.pop(0)
 				del self._cache[oldest_key]
 				logger.debug(f"Evicted oldest cache entry {oldest_key[:8]}...")
 			
-			# Store new entry
+			# Store new entry with current timestamp
 			self._cache[cache_key] = (dom_state, time.time())
+			
+			# Update LRU access order
 			if cache_key in self._access_order:
 				self._access_order.remove(cache_key)
 			self._access_order.append(cache_key)
 			
-			# Track cache key for this page
+			# Track cache key by page for automatic cleanup
+			# When page is garbage collected, associated cache entries are cleared
 			if page not in self._page_caches:
 				self._page_caches[page] = set()
 			self._page_caches[page].add(cache_key)

@@ -2115,7 +2115,19 @@ class BrowserSession(BaseModel):
 	@observe_debug(ignore_output=True, name='get_dom_element_by_index')
 	@require_healthy_browser(usable_page=True, reopen_page=True)
 	async def get_dom_element_by_index(self, index: int) -> DOMElementNode | None:
-		"""Get DOM element by index."""
+		"""
+		BROWSER SESSION STEP 1: Retrieve DOM element by index
+		=====================================================
+		This method is called when the agent wants to interact with an element.
+		
+		WORKFLOW:
+		1. Get the current selector map (index -> element mapping)
+		2. Look up element by highlight index
+		3. Return DOMElementNode or None if not found
+		
+		The selector map was created during DOM extraction (Step 10.4)
+		and contains all interactive elements with their highlight indices.
+		"""
 		selector_map = await self.get_selector_map()
 		return selector_map.get(index)
 
@@ -2124,7 +2136,17 @@ class BrowserSession(BaseModel):
 	@require_healthy_browser(usable_page=True, reopen_page=True)
 	async def _click_element_node(self, element_node: DOMElementNode) -> str | None:
 		"""
-		Optimized method to click an element using xpath.
+		BROWSER SESSION STEP 2: Execute click on DOM element
+		====================================================
+		This performs the actual browser automation to click an element.
+		
+		WORKFLOW:
+		1. Get Playwright element handle from XPath
+		2. Set up download monitoring
+		3. Execute click action
+		4. Handle side effects (downloads, navigation)
+		
+		This is the final step where DOM element becomes browser action.
 		"""
 		page = await self.get_current_page()
 		try:
@@ -3152,12 +3174,18 @@ class BrowserSession(BaseModel):
 	async def get_state_summary(
 		self, cache_clickable_elements_hashes: bool, include_screenshot: bool = True
 	) -> BrowserStateSummary:
-		self.logger.debug('🔄 Starting get_state_summary...')
-		"""Get a summary of the current browser state
-
-		This method builds a BrowserStateSummary object that captures the current state
-		of the browser, including url, title, tabs, screenshot, and DOM tree.
-
+		"""
+		BROWSER STATE ENTRY POINT: Get complete browser state
+		====================================================
+		This is the main entry point when the agent needs to understand the page.
+		It orchestrates screenshot capture and DOM extraction.
+		
+		WORKFLOW:
+		1. Take screenshot of current page
+		2. Trigger DOM extraction (Steps 7-11)
+		3. Track element changes between steps
+		4. Return complete state summary
+		
 		Parameters:
 		-----------
 		cache_clickable_elements_hashes: bool
@@ -3168,6 +3196,7 @@ class BrowserSession(BaseModel):
 			If True, include screenshot in the state summary. Set to False to improve performance
 			when screenshots are not needed (e.g., in multi_act element validation).
 		"""
+		self.logger.debug('🔄 Starting get_state_summary...')
 
 		updated_state = await self._get_updated_state(include_screenshot=include_screenshot)
 
@@ -3252,7 +3281,19 @@ class BrowserSession(BaseModel):
 
 	@observe_debug(ignore_input=True, ignore_output=True, name='get_updated_state')
 	async def _get_updated_state(self, focus_element: int = -1, include_screenshot: bool = True) -> BrowserStateSummary:
-		"""Update and return state."""
+		"""
+		BROWSER STATE STEP 2: Get updated browser state
+		===============================================
+		This method coordinates screenshot and DOM extraction.
+		
+		WORKFLOW:
+		1. Validate current page
+		2. Take screenshot (if requested)
+		3. Extract DOM via dom_service.get_clickable_elements()
+		4. Compile complete browser state
+		
+		This is where DOM extraction (Steps 7-11) is triggered!
+		"""
 
 		# Check if current page is still valid, if not switch to another available page
 		page = await self.get_current_page()
@@ -3330,6 +3371,15 @@ class BrowserSession(BaseModel):
 			except Exception as e:
 				self.logger.debug(f'PDF auto-download check failed: {type(e).__name__}: {e}')
 
+			# BROWSER STATE STEP 3: Trigger DOM extraction
+			# ============================================
+			# This is where we call the DOM service to extract all interactive elements.
+			# This triggers the entire DOM workflow (Steps 7-11):
+			# - Step 7: Entry point (dom_service.get_clickable_elements)
+			# - Step 8: Cache check
+			# - Step 9: JavaScript execution
+			# - Step 10: Python object construction
+			# - Step 11: Cache storage
 			self.logger.debug('🌳 Starting DOM processing...')
 			from browser_use.dom.service import DomService
 
@@ -3337,9 +3387,9 @@ class BrowserSession(BaseModel):
 			try:
 				content = await asyncio.wait_for(
 					dom_service.get_clickable_elements(
-						focus_element=focus_element,
-						viewport_expansion=self.browser_profile.viewport_expansion,
-						highlight_elements=self.browser_profile.highlight_elements,
+						focus_element=focus_element,                                    # Specific element to highlight
+						viewport_expansion=self.browser_profile.viewport_expansion,     # Pixels to expand viewport
+						highlight_elements=self.browser_profile.highlight_elements,     # Create visual overlays
 					),
 					timeout=45.0,  # 45 second timeout for DOM processing - generous for complex pages
 				)

@@ -26,14 +26,36 @@ from browser_use.utils import is_new_tab_page, time_execution_async
 
 
 class DomService:
+	"""
+	PYTHON DOM SERVICE - ORCHESTRATOR
+	=================================
+	This service coordinates DOM extraction between browser and Python.
+	
+	WORKFLOW:
+	STEP 7: Python receives request for DOM state
+	STEP 8: Check cache for recent DOM state
+	STEP 9: Execute JavaScript DOM extraction
+	STEP 10: Convert JavaScript results to Python objects
+	STEP 11: Cache and return DOM state
+	"""
 	logger: logging.Logger
 
 	def __init__(self, page: 'Page', logger: logging.Logger | None = None):
+		"""
+		Initialize DOM service for a specific browser page.
+		
+		Components:
+		- page: Playwright page instance
+		- xpath_cache: Cache for XPath lookups (legacy)
+		- dom_cache: Global DOM state cache (optimized)
+		- js_code: JavaScript DOM extraction code (index.js)
+		"""
 		self.page = page
 		self.xpath_cache = {}
 		self.logger = logger or logging.getLogger(__name__)
 		self.dom_cache = get_dom_cache()
 
+		# Load JavaScript code once at initialization
 		self.js_code = resources.files('browser_use.dom.dom_tree').joinpath('index.js').read_text()
 
 	# region - Clickable elements
@@ -45,18 +67,39 @@ class DomService:
 		focus_element: int = -1,
 		viewport_expansion: int = 0,
 	) -> DOMState:
-		# Try to get from cache first
+		"""
+		STEP 7: Main entry point for DOM extraction
+		===========================================
+		This is called by the agent when it needs to understand the page.
+		
+		Parameters:
+		- highlight_elements: Whether to create visual highlights
+		- focus_element: Specific element index to focus on (-1 for none)
+		- viewport_expansion: Pixels to expand viewport for detection
+		
+		Returns:
+		- DOMState containing element tree and selector map
+		"""
+		
+		# STEP 8: Check cache for recent DOM state
+		# ========================================
+		# Cache key is based on: page URL + parameters
+		# TTL is 2 seconds by default
 		cached_state = await self.dom_cache.get(
 			self.page, highlight_elements, focus_element, viewport_expansion
 		)
 		if cached_state:
+			self.logger.debug("DOM cache hit - returning cached state")
 			return cached_state
 		
-		# Build DOM tree if not cached
+		# STEP 9: Build DOM tree if not cached
+		# ====================================
+		# This will execute JavaScript in the browser
 		element_tree, selector_map = await self._build_dom_tree(highlight_elements, focus_element, viewport_expansion)
 		dom_state = DOMState(element_tree=element_tree, selector_map=selector_map)
 		
-		# Cache the result
+		# STEP 11: Cache the result for future requests
+		# =============================================
 		await self.dom_cache.set(
 			self.page, highlight_elements, focus_element, viewport_expansion, dom_state
 		)
@@ -88,11 +131,26 @@ class DomService:
 		focus_element: int,
 		viewport_expansion: int,
 	) -> tuple[DOMElementNode, SelectorMap]:
+		"""
+		STEP 9: Execute JavaScript DOM extraction
+		=========================================
+		This is where we inject and run our JavaScript code in the browser.
+		
+		WORKFLOW:
+		9.1: Verify JavaScript execution capability
+		9.2: Handle special cases (empty tabs, chrome:// pages)
+		9.3: Prepare arguments for JavaScript
+		9.4: Execute index.js in browser context
+		9.5: Process returned data
+		"""
+		
+		# 9.1: Sanity check - ensure JavaScript can execute
 		if await self.page.evaluate('1+1') != 2:
 			raise ValueError('The page cannot evaluate javascript code properly')
 
+		# 9.2: Optimize for empty/system pages
 		if is_new_tab_page(self.page.url) or self.page.url.startswith('chrome://'):
-			# short-circuit if the page is a new empty tab or chrome:// page for speed, no need to inject buildDomTree.js
+			# Return empty DOM structure without JavaScript execution
 			return (
 				DOMElementNode(
 					tag_name='body',
@@ -105,17 +163,18 @@ class DomService:
 				{},
 			)
 
-		# NOTE: We execute JS code in the browser to extract important DOM information.
-		#       The returned hash map contains information about the DOM tree and the
-		#       relationship between the DOM elements.
+		# 9.3: Prepare arguments for JavaScript execution
+		# These args are passed to the main function in index.js
 		debug_mode = self.logger.getEffectiveLevel() == logging.DEBUG
 		args = {
-			'doHighlightElements': highlight_elements,
-			'focusHighlightIndex': focus_element,
-			'viewportExpansion': viewport_expansion,
-			'debugMode': debug_mode,
+			'doHighlightElements': highlight_elements,      # Create visual overlays
+			'focusHighlightIndex': focus_element,           # Specific element to focus
+			'viewportExpansion': viewport_expansion,         # Viewport detection margin
+			'debugMode': debug_mode,                         # Enable performance metrics
 		}
 
+		# 9.4: Execute JavaScript DOM extraction
+		# This runs our entire index.js code in the browser
 		try:
 			self.logger.debug(f'🔧 Starting JavaScript DOM analysis for {self.page.url[:50]}...')
 			eval_page: dict = await self.page.evaluate(self.js_code, args)
@@ -149,6 +208,7 @@ class DomService:
 				# processed_nodes,
 			)
 
+		# 9.5: Convert JavaScript results to Python objects
 		self.logger.debug('🔄 Starting Python DOM tree construction...')
 		result = await self._construct_dom_tree(eval_page)
 		self.logger.debug('✅ Python DOM tree construction completed')
@@ -159,34 +219,67 @@ class DomService:
 		self,
 		eval_page: dict,
 	) -> tuple[DOMElementNode, SelectorMap]:
-		js_node_map = eval_page['map']
-		js_root_id = eval_page['rootId']
+		"""
+		STEP 10: Convert JavaScript results to Python objects
+		====================================================
+		Transform the JavaScript hash map into Python DOM tree structure.
+		
+		WORKFLOW:
+		10.1: Extract data from JavaScript response
+		10.2: Parse each node into Python objects
+		10.3: Build parent-child relationships
+		10.4: Create selector map for quick lookups
+		10.5: Return complete DOM tree
+		
+		Data structure from JavaScript:
+		- eval_page['map']: Hash map of all DOM nodes
+		- eval_page['rootId']: ID of root element (body)
+		"""
+		
+		# 10.1: Extract JavaScript data structures
+		js_node_map = eval_page['map']      # All DOM nodes by ID
+		js_root_id = eval_page['rootId']    # Root node ID
 
-		selector_map = {}
-		node_map = {}
+		# 10.2: Initialize Python data structures
+		selector_map = {}    # Maps highlight_index -> DOMElementNode
+		node_map = {}        # Maps node_id -> DOMNode
 
+		# 10.3: First pass - create all nodes
 		for id, node_data in js_node_map.items():
+			# Parse JavaScript node data into Python objects
 			node, children_ids = self._parse_node(node_data)
 			if node is None:
 				continue
 
+			# Store node in map
 			node_map[id] = node
 
+			# 10.4: Build selector map for interactive elements
+			# This allows quick lookup by highlight index
 			if isinstance(node, DOMElementNode) and node.highlight_index is not None:
 				selector_map[node.highlight_index] = node
 
-			# NOTE: We know that we are building the tree bottom up
-			#       and all children are already processed.
+		# 10.5: Second pass - build tree relationships
+		# We process bottom-up, so children are already created
+		for id, node_data in js_node_map.items():
+			if id not in node_map:
+				continue
+				
+			node = node_map[id]
 			if isinstance(node, DOMElementNode):
+				# Get children IDs from original data
+				_, children_ids = self._parse_node(node_data)
+				
+				# Link children to parent
 				for child_id in children_ids:
 					if child_id not in node_map:
 						continue
 
 					child_node = node_map[child_id]
-
 					child_node.parent = node
 					node.children.append(child_node)
 
+		# 10.6: Get root element
 		html_to_dict = node_map[str(js_root_id)]
 
 		del node_map

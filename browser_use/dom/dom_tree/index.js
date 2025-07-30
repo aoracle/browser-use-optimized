@@ -1,3 +1,19 @@
+/**
+ * BROWSER-USE DOM EXTRACTION AND PROCESSING
+ * ==========================================
+ * This is the main entry point for DOM extraction that runs inside the browser.
+ * 
+ * WORKFLOW OVERVIEW:
+ * STEP 1: Initialize caching and configuration
+ * STEP 2: Set up highlight container for visual feedback
+ * STEP 3: Extract and process DOM tree
+ * STEP 4: Identify interactive elements
+ * STEP 5: Create visual highlights for clickable elements
+ * STEP 6: Return structured data to Python
+ * 
+ * @param {Object} args - Configuration parameters from Python
+ * @returns {Object} - Structured DOM tree with metadata
+ */
 (
   args = {
     doHighlightElements: true,
@@ -9,7 +25,10 @@
   const { doHighlightElements, focusHighlightIndex, viewportExpansion, debugMode } = args;
   let highlightIndex = 0; // Reset highlight index
 
-  // Add caching mechanisms at the top level
+  // STEP 1: Initialize DOM caching system
+  // =====================================
+  // We cache expensive DOM operations to improve performance
+  // WeakMaps automatically clean up when elements are removed
   const DOM_CACHE = {
     boundingRects: new WeakMap(),
     clientRects: new WeakMap(),
@@ -109,8 +128,17 @@
   // );
 
   /**
-   * Highlights an element in the DOM and returns the index of the next element.
-   *
+   * STEP 2A: Create visual highlight for interactive element
+   * ========================================================
+   * This function creates a visual overlay with a numbered label
+   * for each interactive element found in the DOM.
+   * 
+   * WORKFLOW:
+   * - Create highlight overlay div
+   * - Position it over the target element
+   * - Add numbered label for identification
+   * - Handle updates on scroll/resize
+   * 
    * @param {HTMLElement} element - The element to highlight.
    * @param {number} index - The index of the element.
    * @param {HTMLElement | null} parentIframe - The parent iframe node.
@@ -410,8 +438,16 @@
   }
 
   /**
-   * Checks if a text node is visible.
-   *
+   * STEP 3A: Check if text node is visible
+   * ======================================
+   * Part of the DOM visibility detection system.
+   * Text nodes need special handling as they don't have style properties.
+   * 
+   * WORKFLOW:
+   * - Check parent element visibility
+   * - Verify text content is non-empty
+   * - Check if parent is in viewport (with expansion)
+   * 
    * @param {Text} textNode - The text node to check.
    * @returns {boolean} Whether the text node is visible.
    */
@@ -539,13 +575,22 @@
   }
 
   /**
-   * Checks if an element is interactive.
+   * STEP 4A: Determine if element is interactive/clickable
+   * ======================================================
+   * This is the CORE LOGIC for identifying clickable elements.
    * 
-   * lots of comments, and uncommented code - to show the logic of what we already tried
+   * DETECTION PRIORITY (from fastest to most thorough):
+   * 1. Cursor style check (PRIMARY - most reliable)
+   * 2. Semantic HTML tags (a, button, input, etc.)
+   * 3. ARIA roles (button, link, etc.)
+   * 4. ContentEditable attribute
+   * 5. Tabindex presence
    * 
-   * One of the things we tried at the beginning was also to use event listeners, and other fancy class, style stuff -> what actually worked best was just combining most things with computed cursor style :)
+   * NOTE: We found cursor style to be the most reliable indicator
+   * after testing many approaches including event listeners.
    * 
    * @param {HTMLElement} element - The element to check.
+   * @returns {boolean} Whether the element is interactive.
    */
   function isInteractiveElement(element) {
     if (!element || element.nodeType !== Node.ELEMENT_NODE) {
@@ -1178,8 +1223,18 @@
   }
 
   /**
-   * Creates a node data object for a given node and its descendants.
-   *
+   * STEP 5: Build DOM tree recursively
+   * ==================================
+   * This is the MAIN RECURSIVE FUNCTION that processes the entire DOM.
+   * 
+   * WORKFLOW FOR EACH NODE:
+   * 1. Check if node should be processed (visibility, type)
+   * 2. Determine if node is interactive
+   * 3. Create highlight if interactive and visible
+   * 4. Store node data in hash map
+   * 5. Process all child nodes recursively
+   * 6. Handle special cases (iframes, shadow DOM)
+   * 
    * @param {HTMLElement} node - The node to process.
    * @param {HTMLElement | null} parentIframe - The parent iframe node.
    * @param {boolean} isParentHighlighted - Whether the parent node is highlighted.
@@ -1391,10 +1446,24 @@
     return id;
   }
 
+  // STEP 6: Execute DOM extraction and return results
+  // ==================================================
+  // This is where everything comes together!
+  
+  // 6.1: Start recursive DOM processing from document.body
   const rootId = buildDomTree(document.body);
 
-  // Clear the cache before starting
+  // 6.2: Clear the cache to free memory
   DOM_CACHE.clearCache();
 
+  // 6.3: Return structured data to Python
+  // Returns:
+  // - rootId: ID of the root element (body)
+  // - map: Hash map of all processed nodes with their data
+  //   Each node in map contains:
+  //   - tagName, xpath, attributes
+  //   - isInteractive, isTopElement, isInViewport
+  //   - highlightIndex (if interactive and visible)
+  //   - children array of child node IDs
   return { rootId, map: DOM_HASH_MAP };
 };

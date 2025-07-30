@@ -3,11 +3,19 @@ DOM CACHING SERVICE - PERFORMANCE OPTIMIZATION
 ==============================================
 This module implements caching for DOM states to avoid redundant extractions.
 
-CACHE WORKFLOW:
-STEP 8A: Check if DOM state exists in cache
-STEP 8B: Validate cache entry (TTL, page state)
-STEP 11A: Store newly extracted DOM state
-STEP 11B: Manage cache size (LRU eviction)
+WORKFLOW 2.x: CACHED DOM RETRIEVAL
+==================================
+2.0: Receive DOM request
+2.1: Check cache for valid entry
+2.2: Return cached state (skip extraction)
+
+WORKFLOW 1.x: CACHE MISS HANDLING
+=================================
+1.8: Cache check returns None
+1.11: Store newly extracted DOM state
+1.11.1: Check cache capacity
+1.11.2: LRU eviction if needed
+1.11.3: Store with timestamp
 
 Cache dramatically improves performance by avoiding re-extraction
 of DOM states within a short time window (default 2 seconds).
@@ -70,16 +78,16 @@ class DOMCache:
 		viewport_expansion: int,
 	) -> Optional[DOMState]:
 		"""
-		STEP 8A: Check if DOM state exists in cache
-		===========================================
+		WORKFLOW 2.1: Check if DOM state exists in cache
+		================================================
 		Attempts to retrieve a cached DOM state for the given parameters.
 		
-		Cache lookup process:
-		1. Generate cache key from page URL and parameters
-		2. Check if key exists in cache
-		3. Validate entry hasn't expired (TTL check)
-		4. Update LRU ordering if valid
-		5. Return cached state or None
+		SUB-STEPS:
+		2.1.1: Generate cache key from page URL and parameters
+		2.1.2: Check if key exists in cache
+		2.1.3: Validate entry hasn't expired (TTL check)
+		2.1.4: Update LRU ordering if valid
+		2.1.5: Return cached state or None (triggers Workflow 1.x if None)
 		"""
 		cache_key = self._generate_cache_key(page, highlight_elements, focus_element, viewport_expansion)
 		
@@ -87,8 +95,7 @@ class DOMCache:
 			if cache_key in self._cache:
 				dom_state, timestamp = self._cache[cache_key]
 				
-				# STEP 8B: Validate cache entry
-				# Check if cache entry has expired
+				# 2.1.3: Validate cache entry TTL
 				if time.time() - timestamp > self.ttl_seconds:
 					logger.debug(f"Cache expired for key {cache_key[:8]}...")
 					del self._cache[cache_key]
@@ -113,16 +120,16 @@ class DOMCache:
 		dom_state: DOMState,
 	) -> None:
 		"""
-		STEP 11A: Store newly extracted DOM state
-		=========================================
+		WORKFLOW 1.11: Store newly extracted DOM state
+		==============================================
 		Caches a DOM state after successful extraction.
 		
-		Storage process:
-		1. Generate cache key
-		2. Check cache capacity
-		3. Evict oldest entry if needed (LRU)
-		4. Store state with timestamp
-		5. Track cache key for page cleanup
+		SUB-STEPS:
+		1.11.1: Generate cache key
+		1.11.2: Check cache capacity
+		1.11.3: Evict oldest entry if needed (LRU)
+		1.11.4: Store state with timestamp
+		1.11.5: Track cache key for page cleanup
 		"""
 		cache_key = self._generate_cache_key(page, highlight_elements, focus_element, viewport_expansion)
 		

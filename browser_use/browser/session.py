@@ -2116,16 +2116,16 @@ class BrowserSession(BaseModel):
 	@require_healthy_browser(usable_page=True, reopen_page=True)
 	async def get_dom_element_by_index(self, index: int) -> DOMElementNode | None:
 		"""
-		BROWSER SESSION STEP 1: Retrieve DOM element by index
-		=====================================================
+		WORKFLOW 3.1.1: Retrieve DOM element by index
+		=============================================
 		This method is called when the agent wants to interact with an element.
 		
-		WORKFLOW:
-		1. Get the current selector map (index -> element mapping)
-		2. Look up element by highlight index
-		3. Return DOMElementNode or None if not found
+		SUB-STEPS:
+		3.1.1.1: Get the current selector map (index -> element mapping)
+		3.1.1.2: Look up element by highlight index
+		3.1.1.3: Return DOMElementNode or None if not found
 		
-		The selector map was created during DOM extraction (Step 10.4)
+		The selector map was created during DOM extraction (Workflow 1.10.4)
 		and contains all interactive elements with their highlight indices.
 		"""
 		selector_map = await self.get_selector_map()
@@ -2136,15 +2136,15 @@ class BrowserSession(BaseModel):
 	@require_healthy_browser(usable_page=True, reopen_page=True)
 	async def _click_element_node(self, element_node: DOMElementNode) -> str | None:
 		"""
-		BROWSER SESSION STEP 2: Execute click on DOM element
-		====================================================
+		WORKFLOW 3.1.3: Execute click on DOM element
+		============================================
 		This performs the actual browser automation to click an element.
 		
-		WORKFLOW:
-		1. Get Playwright element handle from XPath
-		2. Set up download monitoring
-		3. Execute click action
-		4. Handle side effects (downloads, navigation)
+		SUB-STEPS:
+		3.1.3.1: Get Playwright element handle from XPath
+		3.1.3.2: Set up download monitoring
+		3.1.3.3: Execute click action
+		3.1.3.4: Handle side effects (downloads, navigation)
 		
 		This is the final step where DOM element becomes browser action.
 		"""
@@ -3180,11 +3180,11 @@ class BrowserSession(BaseModel):
 		This is the main entry point when the agent needs to understand the page.
 		It orchestrates screenshot capture and DOM extraction.
 		
-		WORKFLOW:
-		1. Take screenshot of current page
-		2. Trigger DOM extraction (Steps 7-11)
-		3. Track element changes between steps
-		4. Return complete state summary
+		Routes to multiple workflows:
+		- WORKFLOW 1.x: Full DOM extraction (cache miss)
+		- WORKFLOW 2.x: Cached DOM retrieval (cache hit)
+		- WORKFLOW 4.x: Error recovery flow
+		- WORKFLOW 5.x: Empty/system page optimization
 		
 		Parameters:
 		-----------
@@ -3282,17 +3282,18 @@ class BrowserSession(BaseModel):
 	@observe_debug(ignore_input=True, ignore_output=True, name='get_updated_state')
 	async def _get_updated_state(self, focus_element: int = -1, include_screenshot: bool = True) -> BrowserStateSummary:
 		"""
-		BROWSER STATE STEP 2: Get updated browser state
-		===============================================
-		This method coordinates screenshot and DOM extraction.
+		Get updated browser state - coordinates DOM extraction workflows.
 		
-		WORKFLOW:
-		1. Validate current page
-		2. Take screenshot (if requested)
-		3. Extract DOM via dom_service.get_clickable_elements()
-		4. Compile complete browser state
+		This method routes to different workflows based on page type:
+		- WORKFLOW 5.x for empty/system pages
+		- WORKFLOW 1.x/2.x for normal pages (based on cache)
+		- WORKFLOW 4.x for error cases
 		
-		This is where DOM extraction (Steps 7-11) is triggered!
+		SUB-STEPS:
+		- Validate current page
+		- Take screenshot (if requested)
+		- Extract DOM via dom_service.get_clickable_elements()
+		- Compile complete browser state
 		"""
 
 		# Check if current page is still valid, if not switch to another available page
@@ -3371,15 +3372,12 @@ class BrowserSession(BaseModel):
 			except Exception as e:
 				self.logger.debug(f'PDF auto-download check failed: {type(e).__name__}: {e}')
 
-			# BROWSER STATE STEP 3: Trigger DOM extraction
-			# ============================================
-			# This is where we call the DOM service to extract all interactive elements.
-			# This triggers the entire DOM workflow (Steps 7-11):
-			# - Step 7: Entry point (dom_service.get_clickable_elements)
-			# - Step 8: Cache check
-			# - Step 9: JavaScript execution
-			# - Step 10: Python object construction
-			# - Step 11: Cache storage
+			# DOM EXTRACTION ROUTING
+			# ======================
+			# This call routes to the appropriate workflow:
+			# - WORKFLOW 1.x: Full extraction if cache misses
+			# - WORKFLOW 2.x: Cached retrieval if cache hits
+			# The DOM service handles the routing internally
 			self.logger.debug('🌳 Starting DOM processing...')
 			from browser_use.dom.service import DomService
 

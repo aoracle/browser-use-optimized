@@ -31,12 +31,25 @@ class DomService:
 	=================================
 	This service coordinates DOM extraction between browser and Python.
 	
-	WORKFLOW:
-	STEP 7: Python receives request for DOM state
-	STEP 8: Check cache for recent DOM state
-	STEP 9: Execute JavaScript DOM extraction
-	STEP 10: Convert JavaScript results to Python objects
-	STEP 11: Cache and return DOM state
+	WORKFLOW 1.x: FULL DOM EXTRACTION (Cache Miss)
+	==============================================
+	1.7: Python receives request for DOM state
+	1.8: Check cache (miss - not found or expired)
+	1.9: Execute JavaScript DOM extraction
+	1.10: Convert JavaScript results to Python objects
+	1.11: Cache and return DOM state
+	
+	WORKFLOW 2.x: CACHED DOM RETRIEVAL (Cache Hit)
+	==============================================
+	2.0: Python receives request for DOM state
+	2.1: Check cache (hit - valid entry found)
+	2.2: Return cached DOM state immediately
+	
+	WORKFLOW 5.x: EMPTY/SYSTEM PAGE OPTIMIZATION
+	============================================
+	5.0: Detect empty tab or chrome:// page
+	5.1: Skip JavaScript execution
+	5.2: Return minimal DOM structure
 	"""
 	logger: logging.Logger
 
@@ -68,9 +81,7 @@ class DomService:
 		viewport_expansion: int = 0,
 	) -> DOMState:
 		"""
-		STEP 7: Main entry point for DOM extraction
-		===========================================
-		This is called by the agent when it needs to understand the page.
+		Main entry point for DOM extraction - routes to appropriate workflow.
 		
 		Parameters:
 		- highlight_elements: Whether to create visual highlights
@@ -81,25 +92,27 @@ class DomService:
 		- DOMState containing element tree and selector map
 		"""
 		
-		# STEP 8: Check cache for recent DOM state
-		# ========================================
-		# Cache key is based on: page URL + parameters
-		# TTL is 2 seconds by default
+		# WORKFLOW ROUTING: Check cache first
+		# ===================================
+		# This determines whether we follow Workflow 1.x or 2.x
+		
+		# WORKFLOW 2.0: Check cache for recent DOM state
 		cached_state = await self.dom_cache.get(
 			self.page, highlight_elements, focus_element, viewport_expansion
 		)
 		if cached_state:
+			# WORKFLOW 2.1-2.2: Cache hit - return immediately
 			self.logger.debug("DOM cache hit - returning cached state")
 			return cached_state
 		
-		# STEP 9: Build DOM tree if not cached
-		# ====================================
-		# This will execute JavaScript in the browser
+		# WORKFLOW 1.8: Cache miss - need full extraction
+		self.logger.debug("DOM cache miss - performing full extraction")
+		
+		# WORKFLOW 1.9: Build DOM tree via JavaScript
 		element_tree, selector_map = await self._build_dom_tree(highlight_elements, focus_element, viewport_expansion)
 		dom_state = DOMState(element_tree=element_tree, selector_map=selector_map)
 		
-		# STEP 11: Cache the result for future requests
-		# =============================================
+		# WORKFLOW 1.11: Cache the result for future requests
 		await self.dom_cache.set(
 			self.page, highlight_elements, focus_element, viewport_expansion, dom_state
 		)
@@ -132,25 +145,25 @@ class DomService:
 		viewport_expansion: int,
 	) -> tuple[DOMElementNode, SelectorMap]:
 		"""
-		STEP 9: Execute JavaScript DOM extraction
-		=========================================
+		WORKFLOW 1.9: Execute JavaScript DOM extraction
+		===============================================
 		This is where we inject and run our JavaScript code in the browser.
 		
-		WORKFLOW:
-		9.1: Verify JavaScript execution capability
-		9.2: Handle special cases (empty tabs, chrome:// pages)
-		9.3: Prepare arguments for JavaScript
-		9.4: Execute index.js in browser context
-		9.5: Process returned data
+		SUB-STEPS:
+		1.9.1: Verify JavaScript execution capability
+		1.9.2: Check for empty/system pages (Workflow 5.x)
+		1.9.3: Prepare arguments for JavaScript
+		1.9.4: Execute index.js in browser context
+		1.9.5: Process returned data
 		"""
 		
-		# 9.1: Sanity check - ensure JavaScript can execute
+		# 1.9.1: Sanity check - ensure JavaScript can execute
 		if await self.page.evaluate('1+1') != 2:
 			raise ValueError('The page cannot evaluate javascript code properly')
 
-		# 9.2: Optimize for empty/system pages
+		# WORKFLOW 5.0-5.2: Optimize for empty/system pages
 		if is_new_tab_page(self.page.url) or self.page.url.startswith('chrome://'):
-			# Return empty DOM structure without JavaScript execution
+			# Skip JavaScript execution, return minimal structure
 			return (
 				DOMElementNode(
 					tag_name='body',
@@ -163,8 +176,7 @@ class DomService:
 				{},
 			)
 
-		# 9.3: Prepare arguments for JavaScript execution
-		# These args are passed to the main function in index.js
+		# 1.9.3: Prepare arguments for JavaScript execution
 		debug_mode = self.logger.getEffectiveLevel() == logging.DEBUG
 		args = {
 			'doHighlightElements': highlight_elements,      # Create visual overlays
@@ -173,13 +185,13 @@ class DomService:
 			'debugMode': debug_mode,                         # Enable performance metrics
 		}
 
-		# 9.4: Execute JavaScript DOM extraction
-		# This runs our entire index.js code in the browser
+		# 1.9.4: Execute JavaScript DOM extraction (triggers Workflow 1.0-1.6)
 		try:
 			self.logger.debug(f'🔧 Starting JavaScript DOM analysis for {self.page.url[:50]}...')
 			eval_page: dict = await self.page.evaluate(self.js_code, args)
 			self.logger.debug('✅ JavaScript DOM analysis completed')
 		except Exception as e:
+			# WORKFLOW 4.0-4.1: Error recovery flow
 			self.logger.error('Error evaluating JavaScript: %s', e)
 			raise
 
@@ -208,7 +220,7 @@ class DomService:
 				# processed_nodes,
 			)
 
-		# 9.5: Convert JavaScript results to Python objects
+		# 1.9.5: Convert JavaScript results to Python objects
 		self.logger.debug('🔄 Starting Python DOM tree construction...')
 		result = await self._construct_dom_tree(eval_page)
 		self.logger.debug('✅ Python DOM tree construction completed')
@@ -220,16 +232,16 @@ class DomService:
 		eval_page: dict,
 	) -> tuple[DOMElementNode, SelectorMap]:
 		"""
-		STEP 10: Convert JavaScript results to Python objects
-		====================================================
+		WORKFLOW 1.10: Convert JavaScript results to Python objects
+		==========================================================
 		Transform the JavaScript hash map into Python DOM tree structure.
 		
-		WORKFLOW:
-		10.1: Extract data from JavaScript response
-		10.2: Parse each node into Python objects
-		10.3: Build parent-child relationships
-		10.4: Create selector map for quick lookups
-		10.5: Return complete DOM tree
+		SUB-STEPS:
+		1.10.1: Extract data from JavaScript response
+		1.10.2: Parse each node into Python objects
+		1.10.3: Build parent-child relationships
+		1.10.4: Create selector map for quick lookups
+		1.10.5: Return complete DOM tree
 		
 		Data structure from JavaScript:
 		- eval_page['map']: Hash map of all DOM nodes

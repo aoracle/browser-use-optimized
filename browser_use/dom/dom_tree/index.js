@@ -3,13 +3,21 @@
  * ==========================================
  * This is the main entry point for DOM extraction that runs inside the browser.
  * 
- * WORKFLOW OVERVIEW:
- * STEP 1: Initialize caching and configuration
- * STEP 2: Set up highlight container for visual feedback
- * STEP 3: Extract and process DOM tree
- * STEP 4: Identify interactive elements
- * STEP 5: Create visual highlights for clickable elements
- * STEP 6: Return structured data to Python
+ * WORKFLOW 1.x: FULL DOM EXTRACTION (Cache Miss Path)
+ * ===================================================
+ * 1.0: JavaScript execution triggered by Python
+ * 1.1: Initialize caching and configuration
+ * 1.2: Set up highlight container for visual feedback
+ * 1.3: Extract and process DOM tree recursively
+ * 1.4: Identify interactive elements
+ * 1.5: Create visual highlights for clickable elements
+ * 1.6: Return structured data to Python
+ * 
+ * WORKFLOW 4.x: ERROR RECOVERY FLOW
+ * =================================
+ * 4.0: JavaScript execution fails
+ * 4.1: Python catches error
+ * 4.2: Fallback to minimal DOM state
  * 
  * @param {Object} args - Configuration parameters from Python
  * @returns {Object} - Structured DOM tree with metadata
@@ -25,8 +33,8 @@
   const { doHighlightElements, focusHighlightIndex, viewportExpansion, debugMode } = args;
   let highlightIndex = 0; // Reset highlight index
 
-  // STEP 1: Initialize DOM caching system
-  // =====================================
+  // WORKFLOW 1.1: Initialize DOM caching system
+  // ===========================================
   // We cache expensive DOM operations to improve performance
   // WeakMaps automatically clean up when elements are removed
   const DOM_CACHE = {
@@ -128,16 +136,16 @@
   // );
 
   /**
-   * STEP 2A: Create visual highlight for interactive element
-   * ========================================================
+   * WORKFLOW 1.5: Create visual highlight for interactive element
+   * =============================================================
    * This function creates a visual overlay with a numbered label
    * for each interactive element found in the DOM.
    * 
-   * WORKFLOW:
-   * - Create highlight overlay div
-   * - Position it over the target element
-   * - Add numbered label for identification
-   * - Handle updates on scroll/resize
+   * SUB-STEPS:
+   * 1.5.1: Create highlight overlay div
+   * 1.5.2: Position it over the target element
+   * 1.5.3: Add numbered label for identification
+   * 1.5.4: Handle updates on scroll/resize
    * 
    * @param {HTMLElement} element - The element to highlight.
    * @param {number} index - The index of the element.
@@ -438,15 +446,15 @@
   }
 
   /**
-   * STEP 3A: Check if text node is visible
-   * ======================================
+   * WORKFLOW 1.3.1: Check if text node is visible
+   * ==============================================
    * Part of the DOM visibility detection system.
    * Text nodes need special handling as they don't have style properties.
    * 
-   * WORKFLOW:
-   * - Check parent element visibility
-   * - Verify text content is non-empty
-   * - Check if parent is in viewport (with expansion)
+   * SUB-STEPS:
+   * 1.3.1.1: Check parent element visibility
+   * 1.3.1.2: Verify text content is non-empty
+   * 1.3.1.3: Check if parent is in viewport (with expansion)
    * 
    * @param {Text} textNode - The text node to check.
    * @returns {boolean} Whether the text node is visible.
@@ -575,16 +583,16 @@
   }
 
   /**
-   * STEP 4A: Determine if element is interactive/clickable
-   * ======================================================
+   * WORKFLOW 1.4: Determine if element is interactive/clickable
+   * ===========================================================
    * This is the CORE LOGIC for identifying clickable elements.
    * 
    * DETECTION PRIORITY (from fastest to most thorough):
-   * 1. Cursor style check (PRIMARY - most reliable)
-   * 2. Semantic HTML tags (a, button, input, etc.)
-   * 3. ARIA roles (button, link, etc.)
-   * 4. ContentEditable attribute
-   * 5. Tabindex presence
+   * 1.4.1: Cursor style check (PRIMARY - most reliable)
+   * 1.4.2: Semantic HTML tags (a, button, input, etc.)
+   * 1.4.3: ARIA roles (button, link, etc.)
+   * 1.4.4: ContentEditable attribute
+   * 1.4.5: Tabindex presence
    * 
    * NOTE: We found cursor style to be the most reliable indicator
    * after testing many approaches including event listeners.
@@ -1223,17 +1231,17 @@
   }
 
   /**
-   * STEP 5: Build DOM tree recursively
-   * ==================================
+   * WORKFLOW 1.3: Build DOM tree recursively
+   * ========================================
    * This is the MAIN RECURSIVE FUNCTION that processes the entire DOM.
    * 
-   * WORKFLOW FOR EACH NODE:
-   * 1. Check if node should be processed (visibility, type)
-   * 2. Determine if node is interactive
-   * 3. Create highlight if interactive and visible
-   * 4. Store node data in hash map
-   * 5. Process all child nodes recursively
-   * 6. Handle special cases (iframes, shadow DOM)
+   * SUB-STEPS FOR EACH NODE:
+   * 1.3.1: Check if node should be processed (visibility, type)
+   * 1.3.2: Determine if node is interactive
+   * 1.3.3: Create highlight if interactive and visible
+   * 1.3.4: Store node data in hash map
+   * 1.3.5: Process all child nodes recursively
+   * 1.3.6: Handle special cases (iframes, shadow DOM)
    * 
    * @param {HTMLElement} node - The node to process.
    * @param {HTMLElement | null} parentIframe - The parent iframe node.
@@ -1446,17 +1454,17 @@
     return id;
   }
 
-  // STEP 6: Execute DOM extraction and return results
-  // ==================================================
+  // WORKFLOW 1.6: Execute DOM extraction and return results
+  // =======================================================
   // This is where everything comes together!
   
-  // 6.1: Start recursive DOM processing from document.body
+  // 1.6.1: Start recursive DOM processing from document.body
   const rootId = buildDomTree(document.body);
 
-  // 6.2: Clear the cache to free memory
+  // 1.6.2: Clear the cache to free memory
   DOM_CACHE.clearCache();
 
-  // 6.3: Return structured data to Python
+  // 1.6.3: Return structured data to Python
   // Returns:
   // - rootId: ID of the root element (body)
   // - map: Hash map of all processed nodes with their data

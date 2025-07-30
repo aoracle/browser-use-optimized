@@ -150,19 +150,24 @@ class Controller(Generic[Context]):
 		@self.registry.action('Click element by index', param_model=ClickElementAction)
 		async def click_element_by_index(params: ClickElementAction, browser_session: BrowserSession):
 			"""
-			AGENT STEP 2: Execute click action on DOM element
+			WORKFLOW 3.1: Execute click action on DOM element
 			=================================================
 			This is where the agent's decision to click is executed.
 			
-			WORKFLOW:
-			1. Look up element by highlight index in selector_map
-			2. Validate element exists and is clickable
-			3. Execute click via browser automation
-			4. Handle side effects (downloads, new tabs)
+			SUB-STEPS:
+			3.1.1: Look up element by highlight index in selector_map
+			3.1.2: Validate element exists and is clickable
+			3.1.3: Execute click via browser automation
+			3.1.4: Handle side effects (downloads, new tabs)
+			
+			This workflow happens after:
+			- Agent received DOM state (Workflow 3.0)
+			- LLM decided on action
+			- Controller parsed action parameters
 			"""
 			
-			# STEP 2.1: Look up element in selector map
-			# =========================================
+			# WORKFLOW 3.1.1: Look up element in selector map
+			# ===============================================
 			# The index comes from the LLM's decision (e.g., "click(5)")
 			# We use the selector_map created during DOM extraction
 			element_node = await browser_session.get_dom_element_by_index(params.index)
@@ -171,8 +176,8 @@ class Controller(Generic[Context]):
 
 			initial_pages = len(browser_session.tabs)
 
-			# STEP 2.2: Validate element type
-			# ===============================
+			# WORKFLOW 3.1.2: Validate element type
+			# ====================================
 			# Special handling for file inputs to prevent dialog popups
 			if browser_session.is_file_input(element_node):
 				msg = f'Index {params.index} - has an element which opens file upload dialog. To upload files please use a specific function to upload files '
@@ -181,8 +186,8 @@ class Controller(Generic[Context]):
 
 			msg = None
 
-			# STEP 2.3: Execute the click action
-			# ==================================
+			# WORKFLOW 3.1.3: Execute the click action
+			# =======================================
 			# Uses Playwright to click the actual DOM element
 			try:
 				download_path = await browser_session._click_element_node(element_node)

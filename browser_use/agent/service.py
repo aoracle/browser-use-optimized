@@ -692,27 +692,32 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 
 	async def _prepare_context(self, step_info: AgentStepInfo | None = None) -> BrowserStateSummary:
 		"""
-		AGENT STEP 1: Prepare context for agent decision
-		================================================
+		WORKFLOW 3.0: Agent prepares context for decision
+		=================================================
 		This is where the agent requests DOM state to understand the page.
 		
-		WORKFLOW:
-		1. Request browser state (includes DOM extraction)
-		2. Get current page reference
-		3. Update available actions for the page
-		4. Prepare context for LLM
+		SUB-STEPS:
+		3.0.1: Request browser state (triggers DOM workflows)
+		3.0.2: Get current page reference
+		3.0.3: Update available actions for the page
+		3.0.4: Prepare context for LLM
+		
+		This step can trigger:
+		- WORKFLOW 1.x if DOM cache misses
+		- WORKFLOW 2.x if DOM cache hits
+		- WORKFLOW 5.x for empty pages
 		"""
 		# step_start_time is now set in step() method
 
 		assert self.browser_session is not None, 'BrowserSession is not set up'
 
-		# AGENT STEP 1.1: Request browser state with DOM
+		# WORKFLOW 3.0.1: Request browser state with DOM
 		# ==============================================
-		# This triggers the entire DOM extraction workflow:
+		# This triggers DOM extraction workflows:
 		# - Calls browser_session.get_browser_state_with_recovery()
 		# - Which calls get_state_summary()
 		# - Which calls dom_service.get_clickable_elements()
-		# - DOM extraction workflow (Steps 1-11) executes here
+		# - Routes to appropriate workflow based on cache status
 		self.logger.debug(f'🌐 Step {self.state.n_steps + 1}: Getting browser state...')
 		browser_state_summary = await self.browser_session.get_browser_state_with_recovery(
 			cache_clickable_elements_hashes=True,  # Track element changes between steps
@@ -738,7 +743,7 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 			page_action_message = f'For this page, these additional actions are available:\n{page_filtered_actions}'
 			self._message_manager._add_message_with_type(UserMessage(content=page_action_message), 'consistent')
 
-		# AGENT STEP 1.2: Prepare DOM state for LLM
+		# WORKFLOW 3.0.4: Prepare DOM state for LLM
 		# =========================================
 		# The DOM state is packaged with screenshot and sent to LLM
 		# browser_state_summary contains:
